@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import nltk
 from nltk.corpus import stopwords
 import spacy
@@ -7,26 +8,14 @@ import neuralcoref
 #from allennlp.predictors.predictor import Predictor
 #import allennlp_models.sentiment
 import pickle
-
 nlp = spacy.load('en_core_web_sm')
 coref = neuralcoref.NeuralCoref(nlp.vocab)
-nlp.add_pipe(coref, name='neuralcoref')    
+nlp.add_pipe(coref, name='neuralcoref')        
 
 
-def getDataFromFile(filename):
-    with open(filename, mode="r",encoding="utf-8") as f:
-        news = f.read()
-    
-    return news
-
-#print(getDataFromFile("/home/nb01/C_Drive/KG/KG_Integration/news/2.txt"))
-    
-
-# Check if a word is a Stopword
 def isNotStopWord(word):
     return word not in stopwords.words('english')
 
-#Main preprocessing of web scrapped data
 def preprocessingText(text):
     text = re.sub("[\(\[].*?[\)\]]", "", text)
     sentences = nltk.sent_tokenize(text)
@@ -54,105 +43,111 @@ def preprocessingText(text):
         
     return temp
 
-def getEntityList():
-    entity_list = []
-    return entity_list
+    
+def getPortfilioEntityList(json_portfolio):
+    portfolio_entity_list = []
+    #portfolio_entity_list = json.loads(str(json_portfolio))
+    #print python_obj["name"]
+    #print python_obj["city"]
+    
+    return portfolio_entity_list
 
+
+def getNewsData(filename):
+    with open(filename, mode="r",encoding="utf-8") as f:
+        news = f.read()
+    
+    return news
+    
 def getDocumentObject(text):
     return nlp(text)
 
+def getArticleEntityList(doc):
+    article_entity_list = []
+    for ent in doc.ents:
+        if str(ent) not in article_entity_list:
+            article_entity_list.append(str(ent))
+            
+    return article_entity_list
 
-def getArticleUnicodedMentions(doc):
-    mentions = []
-    if doc._.has_coref:
-        for coref_cluster in doc._.coref_clusters:
-            mentions.append(coref_cluster.main)
-            coref_resolved_doc = doc._.coref_resolved        
-        return mentions, coref_resolved_doc
-    else:
-        #doc = getDocumentObject(doc)
-        return mentions, doc
+
+def getCorefResolved(doc):
+    #if doc._.has_coref:
+    #    coref_resolved_doc = doc._.coref_resolved        
+    #   return str(coref_resolved_doc)
+    #else:
+    #    return doc
+    return doc
 
 
 def getEntitySents(entity, coref_resolved_doc):
     sents = ""
-    sents_flag = False
     for sent in nltk.sent_tokenize(coref_resolved_doc):
-        #print(sent)
-        #print("\n")
         entity_found = False
-        sent = preprocessingText(sent)
         sent_doc = getDocumentObject(sent)
         for ent in sent_doc.ents:
-            print(ent)
             if entity == str(ent):
                 entity_found = True
                 
         if entity_found:
             sents = sents + sent
-            sents_flag = True
-    #print(sents)
-    return sents, sents_flag
+    return sents
 
 
-def getSentimentCustom(sents):
+def getSentimentCustomModel():
     #Loading the sentiment analysis model & vctorizer and working on sentiment analysis of Twitter tweets:
     with open('/home/nb01/C_Drive/KG/KG_Integration/Sentiment analysis/sentiment_analysis_model.pickle','rb') as f:
         clf = pickle.load(f)
     
     with open('/home/nb01/C_Drive/KG/KG_Integration/Sentiment analysis/tfidf_vect.pickle','rb') as f:
         vect = pickle.load(f)
-        
-    sentiment = clf.predict(vect.transform([sents]).toarray())
-    #print("Sentiment score wrt entity =  ",sentiment[0])
     
+    return clf, vect
+
+def getSentimentCustom(clf, vect, sents):
+    sents = preprocessingText(sents)
+    sentiment = clf.predict(vect.transform([sents]).toarray())  
     if sentiment[0] == 1:
         return "Positive"
     else:
         return "Negative"
-
-#def getSentimentAllenNLP(sents):
-#    predictor = Predictor.from_path("https://storage.googleapis.com/allennlp-public-models/sst-roberta-large-2020.02.17.tar.gz")
-#    
-#    return predictor.predict(sentence=article)
-        
-
-#def process(article, entity, wikidata_url):
-def process(entity, filename): 
-    article = getDataFromFile(filename)
-    #print(article)
-    doc = getDocumentObject(article)
-    #print(doc)
-    #print(entity)
-    mentions, coref_resolved_doc = getArticleUnicodedMentions(doc)
-    print(coref_resolved_doc)
-    print(type(coref_resolved_doc))
-    sents, sents_flag = getEntitySents(entity, coref_resolved_doc)
-    #print(sents)
-    #print(sents_flag)
-    if sents_flag:
-        #sentiment = getSentimentAllenNLP(sents)
-        sentiment = getSentimentCustom(sents)
-    else:
-        sentiment = "Neutral"
-    #print(sents)
-    #print(mentions)
-    #print(sentiment)
     
-    return entity, sentiment
-
-news_loc = '/home/nb01/C_Drive/KG/KG_Integration/news/'
-news_entries = os.listdir(news_loc)
-print(news_entries)  
-#entity_list = getEntityList()
-entity_url_list = [["Apple","Q312"], ["Foxconn","Q313"], ["China","Q314"]]
-for entity_url in entity_url_list:
-    print(entity_url)
-    print(entity_url[0])
-    for entry in news_entries:
-        print(entry)
-        filename = news_loc + entry
-        print(filename)
-        entity, sentiment = process(entity_url[0], filename)
-        print(f"For {entity} with wikidata url id {entity_url[1]}, given article has {sentiment} sentiment")
         
+def compareList(portfolio_entity_list, article_entity_list):
+    matching_entities = []
+    for e in portfolio_entity_list:
+        if e not in article_entity_list:
+            continue;
+        else:
+            matching_entities.append(e)
+            
+    return matching_entities
+
+
+def processPortfolioSentiment(portfolio, portfolio_entity_list, filename):
+    news_article = getNewsData(filename)
+    print("News Article: ", news_article)
+    doc = getDocumentObject(news_article)
+    article_entity_list = getArticleEntityList(doc)
+    print("Entities present in news article: ",article_entity_list)
+    matching_entities = compareList(portfolio_entity_list, article_entity_list)
+    print("Entities matching with portfolio entities: ", matching_entities)
+    
+    coref_resolved_doc = getCorefResolved(news_article)
+    for entity in matching_entities:
+        sents = getEntitySents(entity, coref_resolved_doc)
+        clf, vect = getSentimentCustomModel()
+        sentiment = getSentimentCustom(clf, vect, sents)
+        print(f"For portfolio {portfolio}, it's related entity {entity} has {sentiment} sentiment for given news at {filename}")
+        print("\n")           
+        
+
+#portfolio, portfolio_entity_list = getPortfilioEntityList(json_portfolio)
+portfolio, portfolio_entity_list = "Apple", ["Apple", "Foxconn", "China", "Chinese"]
+print("portfolio: ", portfolio)
+print("portfolio_entity_list: ", portfolio_entity_list)         
+news_loc = '/home/nb01/C_Drive/KG/KG_Integration/news/'
+news_filenames = os.listdir(news_loc)
+for fname in news_filenames:
+    filename = news_loc + fname
+    processPortfolioSentiment(portfolio, portfolio_entity_list, filename)
